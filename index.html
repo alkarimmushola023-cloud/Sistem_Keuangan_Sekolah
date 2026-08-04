@@ -351,7 +351,7 @@
     </div>
   </div>
 
-  <!-- MODAL KUITANSI PEMBAYARAN SPP (POPUPS/PRINTABLE) -->
+  <!-- MODAL KUITANSI PEMBAYARAN SPP -->
   <div id="modal-kuitansi" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
     <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
       <div class="flex justify-between items-center border-b pb-3 no-print">
@@ -359,7 +359,6 @@
         <button onclick="closeModalKuitansi()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
-      <!-- Printable Kuitansi Content -->
       <div id="kuitansi-printable-area" class="p-6 border-2 border-dashed border-indigo-200 rounded-xl bg-slate-50/50 space-y-4">
         <div class="text-center border-b border-slate-300 pb-3">
           <h2 class="text-lg font-bold text-slate-900 uppercase tracking-wide">KUITANSI PEMBAYARAN RESMI</h2>
@@ -413,11 +412,12 @@
   <!-- JAVASCRIPT APP LOGIC -->
   <script>
     let transactions = JSON.parse(localStorage.getItem('bendahara_db')) || [];
-    let gasUrl = localStorage.getItem('bendahara_gas_url') || '';
+    // LINK GAS TELAH DITEMPELKAN SEBAGAI FALLBACK UTAMA
+    let gasUrl = localStorage.getItem('bendahara_gas_url') || 'https://script.google.com/macros/s/AKfycbwn0ovJJqXwOaqhPA7ZBSaiZtQ7XfRSi3kHEg90u6rua-s69XCjvuXDkatKLSFIZJA7gw/exec';
     let chartInstance = null;
 
     document.addEventListener("DOMContentLoaded", () => {
-      if(gasUrl) document.getElementById('gas-url-input').value = gasUrl;
+      document.getElementById('gas-url-input').value = gasUrl;
       initChart();
       updateApp();
     });
@@ -485,8 +485,6 @@
       };
       saveTransaction(item);
       document.getElementById('form-spp').reset();
-      
-      // Pop Kuitansi Modal
       showKuitansi(item, nama, kelas, bulan);
     }
 
@@ -518,7 +516,7 @@
     }
 
     function formatRp(num) {
-      return "Rp " + num.toLocaleString('id-ID');
+      return "Rp " + (num || 0).toLocaleString('id-ID');
     }
 
     function updateApp() {
@@ -564,8 +562,8 @@
       const search = document.getElementById('search-input').value.toLowerCase();
       const tbody = document.getElementById('table-transaksi-body');
       const filtered = transactions.filter(t => 
-        t.keterangan.toLowerCase().includes(search) || 
-        t.kategori.toLowerCase().includes(search)
+        (t.keterangan && t.keterangan.toLowerCase().includes(search)) || 
+        (t.kategori && t.kategori.toLowerCase().includes(search))
       );
 
       tbody.innerHTML = filtered.map(t => `
@@ -635,7 +633,6 @@
       }
     }
 
-    // EXCEL IMPORT FUNCTIONALITY
     function importExcelData() {
       const fileInput = document.getElementById('excel-file-input');
       const file = fileInput.files[0];
@@ -703,9 +700,10 @@
       }).catch(err => console.error("Error push to GAS:", err));
     }
 
+    // FUNGSI SYNC DATA DIBERSIHKAN DARI SWAL ERROR
     function syncData() {
       if(!gasUrl) {
-        Swal.fire('https://script.google.com/macros/s/AKfycbwn0ovJJqXwOaqhPA7ZBSaiZtQ7XfRSi3kHEg90u6rua-s69XCjvuXDkatKLSFIZJA7gw/exec');
+        Swal.fire('URL Kosong', 'Silakan isi URL Google Apps Script di menu Pengaturan.', 'warning');
         return;
       }
       const icon = document.getElementById('sync-icon');
@@ -716,17 +714,19 @@
         .then(data => {
           if(Array.isArray(data) && data.length > 0) {
             transactions = data.map(d => ({
-              id: d.ID || Date.now(),
-              tanggal: d.Tanggal || new Date().toISOString().split('T')[0],
-              jenis: d.Jenis || 'Pemasukan',
-              kategori: d.Kategori || 'Lain-lain',
-              jumlah: Number(d.Jumlah) || 0,
-              keterangan: d.Keterangan || '',
-              petugas: d.Petugas || 'Bendahara'
+              id: d.ID || d.id || Date.now(),
+              tanggal: d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0],
+              jenis: d.Jenis || d.jenis || 'Pemasukan',
+              kategori: d.Kategori || d.kategori || 'Lain-lain',
+              jumlah: Number(d.Jumlah || d.jumlah) || 0,
+              keterangan: d.Keterangan || d.keterangan || '',
+              petugas: d.Petugas || d.petugas || 'Bendahara'
             }));
             localStorage.setItem('bendahara_db', JSON.stringify(transactions));
             updateApp();
             Swal.fire('Sinkron Selesai', 'Data berhasil disinkronkan dari Google Sheets!', 'success');
+          } else {
+            Swal.fire('Info', 'Belum ada data di Google Sheets.', 'info');
           }
         })
         .catch(err => Swal.fire('Gagal Sync', 'Tidak dapat mengambil data dari spreadsheet.', 'error'))
