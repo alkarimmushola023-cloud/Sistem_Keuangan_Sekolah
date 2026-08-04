@@ -432,49 +432,59 @@
       fetchDataFromGAS();
     });
 
-    function fetchDataFromGAS(showAlert = false) {
-      if (!gasUrl) return;
+    function fetchDataFromGAS(showSuccessAlert = false) {
+  if (!gasUrl) {
+    if (showSuccessAlert) Swal.fire('URL Kosong', 'Masukkan URL Apps Script di Pengaturan terlebih dahulu.', 'warning');
+    return;
+  }
 
-      const icon = document.getElementById('sync-icon');
-      if (icon) icon.classList.add('fa-spin');
+  const icon = document.getElementById('sync-icon');
+  if (icon) icon.classList.add('fa-spin');
 
-      fetch(gasUrl)
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data)) {
-            // Murni timpa data aplikasi dengan data dari Spreadsheet (termasuk jika spreadsheet kosong / dihapus)
-            transactions = data.map(d => ({
-              id: d.ID || d.id || Date.now(),
-              tanggal: d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0],
-              jenis: d.Jenis || d.jenis || 'Pemasukan',
-              kategori: d.Kategori || d.kategori || 'Lain-lain',
-              jumlah: Number(d.Jumlah || d.jumlah) || 0,
-              keterangan: d.Keterangan || d.keterangan || '',
-              petugas: d.Petugas || d.petugas || 'Bendahara'
-            }));
+  // Menambahkan timestamp agar browser tidak mengambil dari cache lama
+  const fetchUrl = gasUrl + (gasUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
 
-            // Balikkan urutan agar data terbaru berada di paling atas
-            transactions.reverse();
+  fetch(fetchUrl, {
+    method: 'GET',
+    redirect: 'follow'
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Network response was not ok');
+      return res.json();
+    })
+    .then(data => {
+      if (Array.isArray(data)) {
+        transactions = data.map(d => ({
+          id: d.ID || d.id || Date.now(),
+          tanggal: d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0],
+          jenis: d.Jenis || d.jenis || 'Pemasukan',
+          kategori: d.Kategori || d.kategori || 'Lain-lain',
+          jumlah: Number(d.Jumlah || d.jumlah) || 0,
+          keterangan: d.Keterangan || d.keterangan || '',
+          petugas: d.Petugas || d.petugas || 'Bendahara'
+        }));
 
-            // Simpan status terbaru ke LocalStorage
-            localStorage.setItem('bendahara_db', JSON.stringify(transactions));
-            updateApp();
+        transactions.reverse(); // Urutkan transaksi terbaru di atas
+        localStorage.setItem('bendahara_db', JSON.stringify(transactions));
+        updateApp();
 
-            if (showAlert) {
-              Swal.fire('Sinkron Selesai', 'Data berhasil disinkronkan dari Google Sheets!', 'success');
-            }
-          }
-        })
-        .catch(err => {
-          console.error("Gagal sinkron data dari GAS:", err);
-          if (showAlert) {
-            Swal.fire('Gagal Sync', 'Gagal mengambil data dari Google Sheets.', 'error');
-          }
-        })
-        .finally(() => {
-          if (icon) icon.classList.remove('fa-spin');
-        });
-    }
+        if (showSuccessAlert) {
+          Swal.fire('Sinkron Selesai', 'Data berhasil diperbarui dari Google Sheets!', 'success');
+        }
+      } else if (data.error) {
+        throw new Error(data.error);
+      }
+    })
+    .catch(err => {
+      console.error("Detail Error Sync:", err);
+      if (showSuccessAlert) {
+        Swal.fire('Gagal Sync', 'Gagal mengambil data. Pastikan URL Apps Script benar dan status pendeployan "Anyone".', 'error');
+      }
+    })
+    .finally(() => {
+      if (icon) icon.classList.remove('fa-spin');
+    });
+}
 
     function syncData() {
       fetchDataFromGAS(true);
