@@ -81,7 +81,7 @@
         <button onclick="openModalTransaksi()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition-all">
           <i class="fa-solid fa-plus"></i> Catat Kas Baru
         </button>
-        <button onclick="syncData()" class="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-xl transition-all" title="Sinkronisasi Google Sheet">
+        <button onclick="syncData()" class="p-2.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 rounded-xl transition-all" title="Sinkronkan dengan Google Sheets">
           <i class="fa-solid fa-arrows-rotate" id="sync-icon"></i>
         </button>
       </div>
@@ -101,7 +101,7 @@
             </div>
           </div>
           <span class="text-[11px] text-emerald-600 font-medium flex items-center gap-1 mt-4">
-            <i class="fa-solid fa-shield-halved"></i> Real-time terkoneksi database
+            <i class="fa-solid fa-shield-halved"></i> Terkoneksi otomatis dengan Google Sheets
           </span>
         </div>
 
@@ -144,7 +144,7 @@
           <div>
             <h4 class="text-base font-bold text-slate-900 mb-4">Transaksi Terakhir</h4>
             <div id="recent-transactions" class="space-y-3">
-              <p class="text-xs text-slate-400 italic">Belum ada transaksi.</p>
+              <p class="text-xs text-slate-400 italic">Memuat data...</p>
             </div>
           </div>
           <button onclick="switchTab('transaksi')" class="w-full mt-4 py-2 text-center text-xs text-indigo-600 hover:text-indigo-800 font-semibold border border-indigo-100 hover:bg-indigo-50 rounded-xl transition">
@@ -276,7 +276,6 @@
 
     <!-- VIEW 5: PENGATURAN & IMPOR EXCEL -->
     <section id="view-pengaturan" class="hidden space-y-6">
-      <!-- Import Excel Card -->
       <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
         <h3 class="text-lg font-bold text-slate-900 mb-2">Impor Data Transaksi dari Excel (.xlsx / .csv)</h3>
         <p class="text-xs text-slate-500 mb-4">Unggah file Excel berisi transaksi lama. Pastikan header kolom memiliki: <b>Tanggal</b>, <b>Kategori</b>, <b>Jenis</b>, <b>Keterangan</b>, dan <b>Jumlah</b>.</p>
@@ -289,10 +288,9 @@
         </div>
       </div>
 
-      <!-- GAS Configuration Card -->
       <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
         <h3 class="text-lg font-bold text-slate-900 mb-2">Konfigurasi Google Sheets API</h3>
-        <p class="text-xs text-slate-500 mb-4">Masukkan Web App URL Google Apps Script yang telah Anda deploy untuk menghubungkan spreadsheet DB secara otomatis.</p>
+        <p class="text-xs text-slate-500 mb-4">URL Deployment Google Apps Script yang terhubung ke Google Sheets Anda.</p>
         
         <div class="space-y-4 max-w-xl">
           <div>
@@ -409,18 +407,78 @@
     </div>
   </div>
 
-  <!-- JAVASCRIPT APP LOGIC -->
+  <!-- JAVASCRIPT LOGIC -->
   <script>
-    let transactions = JSON.parse(localStorage.getItem('bendahara_db')) || [];
-    // LINK GAS TELAH DITEMPELKAN SEBAGAI FALLBACK UTAMA
+    let transactions = [];
     let gasUrl = localStorage.getItem('bendahara_gas_url') || 'https://script.google.com/macros/s/AKfycbwn0ovJJqXwOaqhPA7ZBSaiZtQ7XfRSi3kHEg90u6rua-s69XCjvuXDkatKLSFIZJA7gw/exec';
     let chartInstance = null;
 
     document.addEventListener("DOMContentLoaded", () => {
       document.getElementById('gas-url-input').value = gasUrl;
       initChart();
-      updateApp();
+
+      // Load cache lokal dulu sementara agar tidak lag
+      const localData = localStorage.getItem('bendahara_db');
+      if (localData) {
+        try {
+          transactions = JSON.parse(localData);
+          updateApp();
+        } catch (e) {
+          transactions = [];
+        }
+      }
+
+      // OTOMATIS AMBIL DATA DARI GOOGLE SHEETS SAAT DIBUKA / DI-REFRESH
+      fetchDataFromGAS();
     });
+
+    function fetchDataFromGAS(showAlert = false) {
+      if (!gasUrl) return;
+
+      const icon = document.getElementById('sync-icon');
+      if (icon) icon.classList.add('fa-spin');
+
+      fetch(gasUrl)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            // Murni timpa data aplikasi dengan data dari Spreadsheet (termasuk jika spreadsheet kosong / dihapus)
+            transactions = data.map(d => ({
+              id: d.ID || d.id || Date.now(),
+              tanggal: d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0],
+              jenis: d.Jenis || d.jenis || 'Pemasukan',
+              kategori: d.Kategori || d.kategori || 'Lain-lain',
+              jumlah: Number(d.Jumlah || d.jumlah) || 0,
+              keterangan: d.Keterangan || d.keterangan || '',
+              petugas: d.Petugas || d.petugas || 'Bendahara'
+            }));
+
+            // Balikkan urutan agar data terbaru berada di paling atas
+            transactions.reverse();
+
+            // Simpan status terbaru ke LocalStorage
+            localStorage.setItem('bendahara_db', JSON.stringify(transactions));
+            updateApp();
+
+            if (showAlert) {
+              Swal.fire('Sinkron Selesai', 'Data berhasil disinkronkan dari Google Sheets!', 'success');
+            }
+          }
+        })
+        .catch(err => {
+          console.error("Gagal sinkron data dari GAS:", err);
+          if (showAlert) {
+            Swal.fire('Gagal Sync', 'Gagal mengambil data dari Google Sheets.', 'error');
+          }
+        })
+        .finally(() => {
+          if (icon) icon.classList.remove('fa-spin');
+        });
+    }
+
+    function syncData() {
+      fetchDataFromGAS(true);
+    }
 
     function switchTab(tab) {
       document.querySelectorAll('section[id^="view-"]').forEach(el => el.classList.add('hidden'));
@@ -566,6 +624,11 @@
         (t.kategori && t.kategori.toLowerCase().includes(search))
       );
 
+      if(filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center p-4 text-slate-400 italic">Data tidak ditemukan.</td></tr>`;
+        return;
+      }
+
       tbody.innerHTML = filtered.map(t => `
         <tr class="hover:bg-slate-50 transition">
           <td class="p-3">${t.tanggal}</td>
@@ -579,7 +642,7 @@
           <td class="p-3 text-right font-bold ${t.jenis === 'Pemasukan' ? 'text-emerald-600' : 'text-rose-600'}">${formatRp(Number(t.jumlah))}</td>
           <td class="p-3 text-center space-x-2">
             ${t.kategori === 'SPP / Iuran' ? `<button onclick="printSingleKuitansi(${t.id})" class="text-indigo-600 hover:text-indigo-800" title="Cetak Kuitansi"><i class="fa-solid fa-receipt"></i></button>` : ''}
-            <button onclick="deleteTx(${t.id})" class="text-slate-400 hover:text-rose-600" title="Hapus"><i class="fa-solid fa-trash"></i></button>
+            <button onclick="deleteTx(${t.id})" class="text-slate-400 hover:text-rose-600" title="Hapus Lokal"><i class="fa-solid fa-trash"></i></button>
           </td>
         </tr>
       `).join('');
@@ -587,6 +650,10 @@
 
     function renderLaporan() {
       const tbody = document.getElementById('laporan-table-body');
+      if(transactions.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center p-4 text-slate-400 italic">Belum ada rincian data.</td></tr>`;
+        return;
+      }
       tbody.innerHTML = transactions.map(t => `
         <tr>
           <td class="p-2 border-b">${t.tanggal}</td>
@@ -599,7 +666,7 @@
     }
 
     function deleteTx(id) {
-      if(confirm('Hapus transaksi ini?')) {
+      if(confirm('Hapus transaksi ini dari tampilan lokal? (Gunakan Google Sheets langsung untuk menghapus permanen dari database)')) {
         transactions = transactions.filter(t => t.id !== id);
         localStorage.setItem('bendahara_db', JSON.stringify(transactions));
         updateApp();
@@ -675,7 +742,7 @@
           localStorage.setItem('bendahara_db', JSON.stringify(transactions));
           updateApp();
           fileInput.value = '';
-          Swal.fire('Impor Berhasil!', `${importedCount} data transaksi berhasil diimpor ke aplikasi.`, 'success');
+          Swal.fire('Impor Berhasil!', `${importedCount} data transaksi berhasil diimpor ke aplikasi & Google Sheets.`, 'success');
         } catch(err) {
           Swal.fire('Format Salah', 'Gagal memproses file Excel. Pastikan format kolom sesuai.', 'error');
         }
@@ -687,7 +754,7 @@
       const url = document.getElementById('gas-url-input').value.trim();
       localStorage.setItem('bendahara_gas_url', url);
       gasUrl = url;
-      Swal.fire('Tersimpan', 'URL Google Apps Script berhasil diperbarui.', 'success');
+      fetchDataFromGAS(true);
     }
 
     function pushToGoogleSheets(data) {
@@ -698,39 +765,6 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       }).catch(err => console.error("Error push to GAS:", err));
-    }
-
-    // FUNGSI SYNC DATA DIBERSIHKAN DARI SWAL ERROR
-    function syncData() {
-      if(!gasUrl) {
-        Swal.fire('URL Kosong', 'Silakan isi URL Google Apps Script di menu Pengaturan.', 'warning');
-        return;
-      }
-      const icon = document.getElementById('sync-icon');
-      icon.classList.add('fa-spin');
-      
-      fetch(gasUrl)
-        .then(res => res.json())
-        .then(data => {
-          if(Array.isArray(data) && data.length > 0) {
-            transactions = data.map(d => ({
-              id: d.ID || d.id || Date.now(),
-              tanggal: d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0],
-              jenis: d.Jenis || d.jenis || 'Pemasukan',
-              kategori: d.Kategori || d.kategori || 'Lain-lain',
-              jumlah: Number(d.Jumlah || d.jumlah) || 0,
-              keterangan: d.Keterangan || d.keterangan || '',
-              petugas: d.Petugas || d.petugas || 'Bendahara'
-            }));
-            localStorage.setItem('bendahara_db', JSON.stringify(transactions));
-            updateApp();
-            Swal.fire('Sinkron Selesai', 'Data berhasil disinkronkan dari Google Sheets!', 'success');
-          } else {
-            Swal.fire('Info', 'Belum ada data di Google Sheets.', 'info');
-          }
-        })
-        .catch(err => Swal.fire('Gagal Sync', 'Tidak dapat mengambil data dari spreadsheet.', 'error'))
-        .finally(() => icon.classList.remove('fa-spin'));
     }
   </script>
 </body>
