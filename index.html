@@ -430,45 +430,61 @@
       fetchDataFromGAS();
     });
 
-    function fetchDataFromGAS(showAlert = false) {
-      if (!gasUrl) return;
+    function fetchDataFromGAS(showSuccessAlert = false) {
+  if (!gasUrl) {
+    if (showSuccessAlert) Swal.fire('URL Kosong', 'Masukkan URL Apps Script terlebih dahulu.', 'warning');
+    return;
+  }
 
-      const icon = document.getElementById('sync-icon');
-      if (icon) icon.classList.add('fa-spin');
+  const icon = document.getElementById('sync-icon');
+  if (icon) icon.classList.add('fa-spin');
 
-      fetch(gasUrl)
-        .then(res => res.json())
-        .then(data => {
-          if (Array.isArray(data)) {
-            transactions = data.map(d => ({
-              id: d.ID || d.id || Date.now(),
-              tanggal: String(d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0]),
-              jenis: String(d.Jenis || d.jenis || 'Pemasukan'),
-              kategori: String(d.Kategori || d.kategori || 'Lain-lain'),
-              jumlah: Number(d.Jumlah || d.jumlah) || 0,
-              keterangan: String(d.Keterangan || d.keterangan || ''),
-              petugas: String(d.Petugas || d.petugas || 'Bendahara')
-            }));
+  const fetchUrl = gasUrl + (gasUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
 
-            transactions.reverse();
-            localStorage.setItem('bendahara_db', JSON.stringify(transactions));
-            updateApp();
+  fetch(fetchUrl, {
+    method: 'GET',
+    redirect: 'follow'
+  })
+    .then(res => {
+      if (!res.ok) throw new Error('Network response was not ok');
+      return res.json();
+    })
+    .then(data => {
+      if (Array.isArray(data)) {
+        // Konversi SELURUH data teks menjadi String secara paksa agar tidak crash saat toLowerCase()
+        transactions = data.map(d => ({
+          id: d.ID || d.id || Date.now(),
+          tanggal: String(d.Tanggal || d.tanggal || new Date().toISOString().split('T')[0]),
+          jenis: String(d.Jenis || d.jenis || 'Pemasukan'),
+          kategori: String(d.Kategori || d.kategori || 'Lain-lain'),
+          jumlah: Number(d.Jumlah || d.jumlah) || 0,
+          keterangan: String(d.Keterangan ?? d.keterangan ?? ''),
+          petugas: String(d.Petugas || d.petugas || 'Bendahara')
+        }));
 
-            if (showAlert) {
-              Swal.fire('Sinkron Selesai', 'Data berhasil disinkronkan dari Google Sheets!', 'success');
-            }
-          }
-        })
-        .catch(err => {
-          console.error("Gagal sinkron data dari GAS:", err);
-          if (showAlert) {
-            Swal.fire('Gagal Sync', 'Gagal mengambil data dari Google Sheets.', 'error');
-          }
-        })
-        .finally(() => {
-          if (icon) icon.classList.remove('fa-spin');
-        });
-    }
+        transactions.reverse(); // Urutkan transaksi terbaru di atas
+        localStorage.setItem('bendahara_db', JSON.stringify(transactions));
+        
+        // Jalankan update aplikasi
+        updateApp();
+
+        if (showSuccessAlert) {
+          Swal.fire('Sinkron Selesai', 'Data berhasil diperbarui dari Google Sheets!', 'success');
+        }
+      } else if (data.error) {
+        throw new Error(data.error);
+      }
+    })
+    .catch(err => {
+      console.error("Detail Error Sync:", err);
+      if (showSuccessAlert) {
+        Swal.fire('Gagal Render Data', 'Terjadi kesalahan saat memproses data: ' + err.message, 'error');
+      }
+    })
+    .finally(() => {
+      if (icon) icon.classList.remove('fa-spin');
+    });
+}
 
     function syncData() {
       fetchDataFromGAS(true);
@@ -611,39 +627,41 @@
     }
 
     function renderTable() {
-      const search = (document.getElementById('search-input').value || '').toLowerCase();
-      const tbody = document.getElementById('table-transaksi-body');
-      
-      const filtered = transactions.filter(t => {
-        const ket = String(t.keterangan || '').toLowerCase();
-        const kat = String(t.kategori || '').toLowerCase();
-        return ket.includes(search) || kat.includes(search);
-      });
+  const searchInput = document.getElementById('search-input');
+  const search = searchInput ? String(searchInput.value || '').toLowerCase() : '';
+  const tbody = document.getElementById('table-transaksi-body');
+  if (!tbody) return;
 
-      if(filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center p-4 text-slate-400 italic">Data tidak ditemukan.</td></tr>`;
-        return;
-      }
+  const filtered = transactions.filter(t => {
+    // Proteksi ekstra: Pastikan keterangan dan kategori selalu berupa String
+    const ket = String(t.keterangan || '').toLowerCase();
+    const kat = String(t.kategori || '').toLowerCase();
+    return ket.includes(search) || kat.includes(search);
+  });
 
-      tbody.innerHTML = filtered.map(t => `
-        <tr class="hover:bg-slate-50 transition">
-          <td class="p-3">${t.tanggal}</td>
-          <td class="p-3">
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${t.jenis === 'Pemasukan' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
-              ${t.jenis}
-            </span>
-          </td>
-          <td class="p-3 font-medium text-slate-700">${t.kategori}</td>
-          <td class="p-3 text-slate-600">${t.keterangan}</td>
-          <td class="p-3 text-right font-bold ${t.jenis === 'Pemasukan' ? 'text-emerald-600' : 'text-rose-600'}">${formatRp(Number(t.jumlah))}</td>
-          <td class="p-3 text-center space-x-2">
-            ${t.kategori === 'SPP / Iuran' ? `<button onclick="printSingleKuitansi(${t.id})" class="text-indigo-600 hover:text-indigo-800" title="Cetak Kuitansi"><i class="fa-solid fa-receipt"></i></button>` : ''}
-            <button onclick="deleteTx(${t.id})" class="text-slate-400 hover:text-rose-600" title="Hapus Lokal"><i class="fa-solid fa-trash"></i></button>
-          </td>
-        </tr>
-      `).join('');
-    }
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center p-4 text-slate-400 italic">Data tidak ditemukan.</td></tr>`;
+    return;
+  }
 
+  tbody.innerHTML = filtered.map(t => `
+    <tr class="hover:bg-slate-50 transition">
+      <td class="p-3">${t.tanggal}</td>
+      <td class="p-3">
+        <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${t.jenis === 'Pemasukan' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}">
+          ${t.jenis}
+        </span>
+      </td>
+      <td class="p-3 font-medium text-slate-700">${t.kategori}</td>
+      <td class="p-3 text-slate-600">${t.keterangan}</td>
+      <td class="p-3 text-right font-bold ${t.jenis === 'Pemasukan' ? 'text-emerald-600' : 'text-rose-600'}">${formatRp(Number(t.jumlah))}</td>
+      <td class="p-3 text-center space-x-2">
+        ${t.kategori === 'SPP / Iuran' ? `<button onclick="printSingleKuitansi(${t.id})" class="text-indigo-600 hover:text-indigo-800" title="Cetak Kuitansi"><i class="fa-solid fa-receipt"></i></button>` : ''}
+        <button onclick="deleteTx(${t.id})" class="text-slate-400 hover:text-rose-600" title="Hapus Lokal"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
     function renderLaporan() {
       const tbody = document.getElementById('laporan-table-body');
       if(transactions.length === 0) {
